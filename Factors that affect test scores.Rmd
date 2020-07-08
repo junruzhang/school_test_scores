@@ -1,0 +1,123 @@
+---
+title: "Factors Affecting Test Scores"
+author: "Junru Zhang"
+date: "06/03/2020"
+output: pdf_document
+---
+The file school.csv (available on Quercus) contains data on 992 Grade 8 students (i.e., most are 11 years old) in 58 primary schools in the Netherlands. The data are adapted from Snijders and Boskers’ Multilevel Analysis, 2nd Edition (Sage, 2012).
+
+` Variables in the school.csv data set`:
+
+| Variable      | Description                                            |
+|---------------|--------------------------------------------------------|
+| school | an ID number indicating which school the student attends                                         |
+| test         | the student’s score on an end-of-year language test                                           |
+| iq | the student’s verbal IQ score         |
+| ses        | the socioeconomic status of the student’s family       |
+| sex        | the student’s sex                           |
+| minority_status        | 1 if the student is an ethnic minority, 0 otherwise                           |
+
+**Question of interest: Which variables are associated with Grade 8 students’ scores on an end-of-year language test?**
+
+```{r message=FALSE}
+library(tidyverse)
+school_data <- read.csv("./school.csv")
+# install.packages("Pmisc", repos = "http://R-Forge.R-project.org", type = "source")
+```
+
+## What Model to Use?
+Linear regression is only a valid option if all obervations are independent. However, since the data is obtained from 58 primary schools, it is very likely that end-of-year language test scores of students in the same school are correlated. Thus, the independent observations assumption of the linear regression model will be violated. i.e. fitting a linear model is not a good choice.
+
+## Visualizing the Data
+
+### Examining the relationship between verbal IQ scores and end-of-year language scores
+Let's create a scatter plot!
+```{r}
+ggplot(school_data, aes(x = iq, y = test)) + 
+  geom_point(alpha = 0.5) + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  theme_classic()
+```
+
+From the graph, we see that as the higher verbal IQ score students have, the better their end-of-year test scores tend to be. In other words, we observe a positive association between students’ verbal IQ scores and end-of-year test scores.
+
+## Creating New Variables
+Before fitting the models, let's create two new variables in the data set, mean_ses that is the mean of ses for each school, and mean_iq that is mean of iq for each school. These are the variables we are interested in studying.
+
+```{r}
+school_data <- school_data %>%
+  group_by(school) %>%
+  mutate(mean_ses = mean(ses), mean_iq = mean(iq))
+```
+
+## Modeling
+
+### Linear Model
+
+Let's first fit a linear model that uses iq, sex, ses, minority_status, mean_ses and mean_iq as the covariates.
+
+```{r}
+m1 <- lm(test ~ iq+sex+ses+minority_status+mean_ses+mean_iq, data= school_data) 
+summary(m1)
+```
+```{r}
+confint(m1)
+```
+
+The intercept is the average end-of-year test scores of the reference group, which are ethenic minority male students with a verbal IQ score of 0. Note that a score of 0 in our context means at the average level, rather than an actual score of 0. So students in the reference group have socioeconomic status and IQ scores that are at the average level. And all other coefficients represent the end-of-year test scores relative to the reference group, while holding all other covariates constant.
+
+Among all these covariates, only the confidence interval for minority_status includes 0. This implies that we have strong evidence to claim that test scores has no association with minority status of students. The remaining covariates are all significantly associated with test scores and they all have confidence intervals which is entirely above 0 except mean socioeconomic status of schools. Having confidence intervals above 0 indicate increasing the unit of these covariates would cause an increase in test scores. Mean socioeconomic status has a confidence interal below 0, which indicates that the socioeconomic status has a negative impact on language test scores of Grade 8 studnets.
+
+## Linear Mixed Model
+Let's now fit a linear mixed model with the same fixed effects as the linear model, and with a random intercept for school.
+
+```{r message=FALSE}
+ lmm1 <- lme4::lmer(test ~ iq + sex + ses + minority_status + 
+                      mean_ses + mean_iq + 
+                      (1|school),
+                    data=school_data)
+summary(lmm1)
+```
+```{r message=FALSE}
+confint(lmm1)
+```
+
+We see that for the random effect $U_i$, which is the schools of the students, $Var(U_i)$=8.177 and Var(e_i) = 38.240. Therefore the random effect explains $\frac{Var(U_i)}{Var(U_i)+Var(e_i)}=\frac{8.177}{8.177+38.240}=0.176=17.6\%$ of the variation of the data.
+
+The confidence intervals of both fixed and random effects are significant except minority status, since their
+confidence intervals all exclude 0. Also, the first two rows of the confidence intervals shows that under a
+5% significance level, random effect would capture at least $\frac{2.1818595^2}{2.1818595^2+5.9011373^2}=0.136=13.6\%$ of the variation. So there is some evidednce that the test scores of students has some association with the schools that they are in.
+
+Fitting a linear mixed model is evidently better than fitting a linear model in this case. However, we still need to verify using data to see whether it the random effect term is worthy being included in the model. 
+
+## Fixed Effects
+
+The coefficients, or the predicted test scores obtained from these two models are roughly the same. Since the sample size of linear model is larger than of the linear mixed model, the standard errors are small, therefore confidence intervals for the mixed model is wider than in the linear model in general. However, there are no random effects in the linear model to capture the differences caused by the schools, that is why some of the CIs for linear model is wider than for the linear mixed model (e.g. iq).
+
+
+## Ramdom Effects
+
+Let's plot the random effects for the different schools to see if it is reasonable to have included these random effects in the linear mixed model.
+
+```{r}
+random_effects <- lme4::ranef(lmm1, condVar=TRUE) 
+ranef_df <- as.data.frame(random_effects) 
+ranef_df %>%
+  ggplot(aes(x = grp, y = condval, ymin = condval - 2*condsd, ymax = condval +
+               2*condsd)) +
+  geom_point() + 
+  geom_errorbar() + 
+  coord_flip()
+```
+
+It does seem reasonable to include these random effects since the intercepts of each group does vary, the estimates and confidence intervals do not line up vertically in a straight line.
+
+## Conclusion
+
+We come to a conclusion that students’ verbal IQ scores, gender, mean IQ score and mean socioeconomic status of their schools are all variables that are associated with Grade 8 students’ scores on an end-of-year language test significantly. (Confidnce intervals excludes 0 for all these covariates.) 
+
+In particular, The average marks for female students are between 1.50 and 3.08 higher than for males. Also, higher IQ scores and higher mean IQ scores of the schools result in better end-of-year test performance. For a one unit increase in a student’s IQ on this scale, the expected mark for a student increases by between 2.1 and 2.5 marks. 
+
+Students at schools with a unit higher average IQ (for the school) also have a higher expected mark of between about 0.6 to 2.6. Having personally higher SES is associated with a higher mark (by only about 0.1 to 0.2 marks for a one unit increase on the index). But a better mean socioeconomic status within each school results in worse end-of-year test performance (between 0.05 and 0.36 lower expected marks for a one unit increase in mean SES), after controlling for the other variables. 
+
+Also, we know that the differences between schools only explains 17.6% of the variation of the data.
